@@ -13,7 +13,7 @@ from src.utils import set_seed, ensure_dir
 from src.data import load_csv, map_target_y
 from src.features import build_features, FeatureSpec
 from src.model import CatBoostParams, train_oof_catboost, train_full_catboost, predict_proba
-from src.metrics import roc_pr_metrics, best_threshold_by_profit, profit_curve, profit_at_threshold, top_k_summary
+from src.metrics import roc_pr_metrics, best_threshold_by_profit, profit_curve, profit_at_threshold, top_k_summary, profit_at_top_pct
 from src.plots import plot_profit_curve, plot_pr_curve, plot_roc_curve
 
 
@@ -63,6 +63,11 @@ def main() -> None:
     )
 
     oof_metrics = roc_pr_metrics(y_train.values, oof_proba)
+
+# Budget-style targeting summaries (Top 5/10/20%) computed on OOF predictions
+pct_list = [0.05, 0.10, 0.20]
+oof_topk = top_k_summary(oof_proba, y_train.values, pct_list=pct_list)
+oof_profit_topk = [profit_at_top_pct(y_train.values, oof_proba, p, args.revenue, args.cost) for p in pct_list]
 
     # Save OOF predictions
     oof_out = train_df.copy()
@@ -127,11 +132,13 @@ def main() -> None:
             # apply best threshold (raw) learned from OOF
             test_profit = profit_at_threshold(y_test, proba_test, best_raw["threshold"], args.revenue, args.cost)
             test_topk = top_k_summary(proba_test, y_test, pct_list=[0.05, 0.10, 0.20])
+            test_profit_topk = [profit_at_top_pct(y_test, proba_test, p, args.revenue, args.cost) for p in [0.05, 0.10, 0.20]]
 
             test_report = {
                 "metrics": test_metrics,
                 "profit_at_best_oof_threshold": test_profit,
                 "topk": test_topk,
+                "profit_topk": test_profit_topk,
             }
 
             plot_roc_curve(y_test, proba_test, outdir / "roc_test.png", title="ROC Curve (Test)")
@@ -143,6 +150,14 @@ def main() -> None:
         call_list["pred_proba"] = proba_test
         call_list["call_flag"] = call_flag
         call_list.to_csv(outdir / "call_target_list.csv", index=False)
+
+# Also export fixed-budget call lists (top 5/10/20% by probability)
+for p in [0.05, 0.10, 0.20]:
+    k = int(np.ceil(len(proba_test) * p))
+    top_idx = np.argsort(-proba_test)[:k]
+    top_df = test_df.iloc[top_idx].copy()
+    top_df["pred_proba"] = proba_test[top_idx]
+    top_df.to_csv(outdir / f"call_target_list_top{int(p*100)}pct.csv", index=False)
 
     # -----------------------
     # 6) write metrics.json

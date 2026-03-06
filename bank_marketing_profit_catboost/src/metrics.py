@@ -115,3 +115,49 @@ def profit_curve(
         call_rates[i] = stat["call_rate"]
 
     return thresholds, profits, call_rates
+
+def profit_at_top_pct(
+    y_true: np.ndarray,
+    proba: np.ndarray,
+    top_pct: float,
+    revenue: float,
+    cost: float,
+) -> Dict[str, float]:
+    """Budget-style targeting: call top X% by predicted probability.
+
+    Profit = TP * revenue - K * cost  (since you call exactly K people)
+    """
+    y_true = np.asarray(y_true).astype(int)
+    proba = np.asarray(proba)
+
+    n = len(proba)
+    k = int(np.ceil(n * float(top_pct)))
+    if k <= 0:
+        return {
+            "top_pct": float(top_pct),
+            "k": 0,
+            "tp": 0,
+            "fp": 0,
+            "profit": 0.0,
+            "precision": float("nan"),
+            "recall": float("nan"),
+        }
+
+    idx = np.argsort(-proba)[:k]
+    tp = int(y_true[idx].sum())
+    fp = int(k - tp)
+    total_pos = int(y_true.sum())
+
+    profit = tp * revenue - k * cost
+    precision = tp / k if k > 0 else float("nan")
+    recall = tp / total_pos if total_pos > 0 else float("nan")
+
+    return {
+        "top_pct": float(top_pct),
+        "k": int(k),
+        "tp": int(tp),
+        "fp": int(fp),
+        "profit": float(profit),
+        "precision": float(precision),
+        "recall": float(recall),
+    }
